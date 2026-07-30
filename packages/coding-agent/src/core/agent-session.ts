@@ -37,9 +37,11 @@ import type {
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
+	getAssistantRetryErrorMessage,
 	getSupportedThinkingLevels,
 	isContextOverflow,
-	isRetryableAssistantError,
+	isRetryableAssistantResponse,
+	isUnauthorizedAssistantError,
 	modelsAreEqual,
 	type RetryCallbacks,
 	resetApiProviders,
@@ -161,12 +163,12 @@ export type AgentSessionEvent =
 			willRetry: boolean;
 			errorMessage?: string;
 	  }
-	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+	| { type: "auto_retry_start"; attempt: number; maxAttempts: number | null; delayMs: number; errorMessage: string }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| {
 			type: "summarization_retry_scheduled";
 			attempt: number;
-			maxAttempts: number;
+			maxAttempts: number | null;
 			delayMs: number;
 			errorMessage: string;
 	  }
@@ -332,6 +334,7 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+	private _unauthorizedRetryAttempt = 0;
 
 	// Bash execution state
 	private readonly _bashAbortControllers = new Set<AbortController>();
@@ -653,13 +656,17 @@ export class AgentSession {
 
 				// Reset retry counter immediately on successful assistant response
 				// This prevents accumulation across multiple LLM calls within a turn
-				if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0) {
+				if (
+					assistantMsg.stopReason !== "error" &&
+					!this._isRetryableResponse(assistantMsg) &&
+					this._retryAttempt > 0
+				) {
 					this._emit({
 						type: "auto_retry_end",
 						success: true,
 						attempt: this._retryAttempt,
 					});
-					this._retryAttempt = 0;
+					this._resetRetryState();
 				}
 			}
 		}
@@ -667,14 +674,15 @@ export class AgentSession {
 
 	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
 		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
+		if (!settings.enabled) {
 			return false;
 		}
 
 		for (let i = event.messages.length - 1; i >= 0; i--) {
 			const message = event.messages[i];
 			if (message.role === "assistant") {
-				return this._isRetryableError(message as AssistantMessage);
+				const assistantMessage = message as AssistantMessage;
+				return this._isRetryableResponse(assistantMessage) && this._hasRetryBudget(assistantMessage, settings);
 			}
 		}
 		return false;
@@ -1079,18 +1087,19 @@ export class AgentSession {
 			return false;
 		}
 
-		if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
+		const retryable = this._isRetryableResponse(msg);
+		if (retryable && (await this._prepareRetry(msg))) {
 			return true;
 		}
 
-		if (msg.stopReason === "error" && this._retryAttempt > 0) {
+		if ((retryable || msg.stopReason === "error") && this._retryAttempt > 0) {
 			this._emit({
 				type: "auto_retry_end",
 				success: false,
 				attempt: this._retryAttempt,
-				finalError: msg.errorMessage,
+				finalError: getAssistantRetryErrorMessage(msg) ?? msg.errorMessage,
 			});
-			this._retryAttempt = 0;
+			this._resetRetryState();
 		}
 
 		if (await this._checkCompaction(msg)) {
@@ -2629,13 +2638,28 @@ export class AgentSession {
 	// =========================================================================
 
 	/**
-	 * Check if an error is retryable (overloaded, rate limit, server errors).
-	 * Context overflow errors are NOT retryable (handled by compaction instead).
+	 * Check if a finalized response should be retried.
+	 * Context overflow errors are handled by compaction instead.
 	 */
-	private _isRetryableError(message: AssistantMessage): boolean {
+	private _isRetryableResponse(message: AssistantMessage): boolean {
 		// Context overflow is handled by compaction, not retry.
 		if (isContextOverflow(message, this.model?.contextWindow ?? 0)) return false;
-		return isRetryableAssistantError(message);
+		return isRetryableAssistantResponse(message);
+	}
+
+	private _hasRetryBudget(
+		message: AssistantMessage,
+		settings: ReturnType<SettingsManager["getRetrySettings"]>,
+	): boolean {
+		if (settings.maxRetries !== null && this._retryAttempt >= settings.maxRetries) {
+			return false;
+		}
+		return !isUnauthorizedAssistantError(message) || this._unauthorizedRetryAttempt < settings.maxUnauthorizedRetries;
+	}
+
+	private _resetRetryState(): void {
+		this._retryAttempt = 0;
+		this._unauthorizedRetryAttempt = 0;
 	}
 
 	/**
@@ -2675,26 +2699,27 @@ export class AgentSession {
 	 */
 	private async _prepareRetry(message: AssistantMessage): Promise<boolean> {
 		const settings = this.settingsManager.getRetrySettings();
-		if (!settings.enabled) {
+		if (!settings.enabled || !this._hasRetryBudget(message, settings)) {
 			return false;
 		}
 
+		const unauthorized = isUnauthorizedAssistantError(message);
 		this._retryAttempt++;
+		if (unauthorized) this._unauthorizedRetryAttempt++;
 
-		if (this._retryAttempt > settings.maxRetries) {
-			// Preserve the completed attempt count so post-run handling can emit the final failure.
-			this._retryAttempt--;
-			return false;
-		}
-
-		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		const delayMs = Math.min(settings.baseDelayMs * 2 ** (this._retryAttempt - 1), settings.maxBackoffMs);
+		const maxAttempts = unauthorized
+			? settings.maxRetries === null
+				? settings.maxUnauthorizedRetries
+				: Math.min(settings.maxRetries, settings.maxUnauthorizedRetries)
+			: settings.maxRetries;
 
 		this._emit({
 			type: "auto_retry_start",
 			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
+			maxAttempts,
 			delayMs,
-			errorMessage: message.errorMessage || "Unknown error",
+			errorMessage: getAssistantRetryErrorMessage(message) ?? message.errorMessage ?? "Unknown error",
 		});
 
 		// Remove error message from agent state (keep in session for history)
@@ -2710,7 +2735,7 @@ export class AgentSession {
 		} catch {
 			// Aborted during sleep - emit end event so UI can clean up
 			const attempt = this._retryAttempt;
-			this._retryAttempt = 0;
+			this._resetRetryState();
 			this._emit({
 				type: "auto_retry_end",
 				success: false,

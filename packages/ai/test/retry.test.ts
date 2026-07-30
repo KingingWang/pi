@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "../src/providers/faux.ts";
+import {
+	getAssistantRetryErrorMessage,
+	isRetryableAssistantError,
+	isRetryableAssistantResponse,
+	isUnauthorizedAssistantError,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -57,12 +64,12 @@ describe("provider retry classification", () => {
 		).toBe(true);
 	});
 
-	it("keeps provider limit errors non-retryable", () => {
+	it("retries provider limit errors when they include an HTTP status", () => {
 		expect(
 			isRetryableAssistantError(
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: "429 quota exceeded" }),
 			),
-		).toBe(false);
+		).toBe(true);
 	});
 
 	it("classifies assistant error messages", () => {
@@ -75,6 +82,52 @@ describe("provider retry classification", () => {
 			),
 		).toBe(true);
 		expect(isRetryableAssistantError(fauxAssistantMessage("not an error"))).toBe(false);
+	});
+
+	it("classifies HTTP 401 responses separately", () => {
+		const response = fauxAssistantMessage("", {
+			stopReason: "error",
+			errorMessage: "401 Unauthorized: invalid_api_key",
+		});
+		expect(isRetryableAssistantError(response)).toBe(true);
+		expect(isUnauthorizedAssistantError(response)).toBe(true);
+		expect(
+			isUnauthorizedAssistantError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" }),
+			),
+		).toBe(true);
+	});
+
+	it("reads HTTP status from diagnostics", () => {
+		const response = {
+			...fauxAssistantMessage("", {
+				stopReason: "error",
+				errorMessage: "request failed",
+			}),
+			diagnostics: [{ type: "provider", timestamp: Date.now(), details: { status: 503 } }],
+		};
+		expect(isRetryableAssistantError(response)).toBe(true);
+	});
+});
+
+describe("assistant output retry classification", () => {
+	it("retries completely empty output", () => {
+		const response = fauxAssistantMessage([]);
+		expect(isRetryableAssistantResponse(response)).toBe(true);
+		expect(getAssistantRetryErrorMessage(response)).toBe("Model returned an empty response");
+	});
+
+	it("retries reasoning-only output", () => {
+		const response = fauxAssistantMessage([fauxThinking("analysis")]);
+		expect(isRetryableAssistantResponse(response)).toBe(true);
+		expect(getAssistantRetryErrorMessage(response)).toBe("Model returned reasoning without text or tool calls");
+	});
+
+	it("accepts text or a tool call as usable output", () => {
+		expect(isRetryableAssistantResponse(fauxAssistantMessage("answer"))).toBe(false);
+		expect(isRetryableAssistantResponse(fauxAssistantMessage([fauxToolCall("read", { path: "README.md" })]))).toBe(
+			false,
+		);
 	});
 });
 
@@ -109,6 +162,70 @@ describe("retryAssistantCall", () => {
 		expect(produce).toHaveBeenCalledTimes(1);
 		expect(onRetryScheduled).not.toHaveBeenCalled();
 		expect(onRetryFinished).not.toHaveBeenCalled();
+	});
+
+	it("retries empty and reasoning-only responses", async () => {
+		const responses = [
+			fauxAssistantMessage([]),
+			fauxAssistantMessage([fauxThinking("analysis")]),
+			fauxAssistantMessage("recovered"),
+		];
+		const produce = vi.fn(async () => responses.shift()!);
+		const res = await retryAssistantCall(produce, enabled, undefined);
+		expect(res.content).toEqual([{ type: "text", text: "recovered" }]);
+		expect(produce).toHaveBeenCalledTimes(3);
+	});
+
+	it("supports unlimited retries until success", async () => {
+		let calls = 0;
+		const produce = vi.fn(async () => {
+			calls++;
+			return calls <= 8
+				? fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 unavailable" })
+				: fauxAssistantMessage("recovered");
+		});
+		const policy: RetryPolicy = { enabled: true, maxRetries: null, baseDelayMs: 0 };
+		const res = await retryAssistantCall(produce, policy, undefined);
+		expect(res.content).toEqual([{ type: "text", text: "recovered" }]);
+		expect(produce).toHaveBeenCalledTimes(9);
+	});
+
+	it("limits HTTP 401 responses to five retries", async () => {
+		const produce = vi.fn(async () =>
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 Unauthorized" }),
+		);
+		const policy: RetryPolicy = { enabled: true, maxRetries: null, baseDelayMs: 0 };
+		const onRetryScheduled = vi.fn();
+		const res = await retryAssistantCall(produce, policy, undefined, { onRetryScheduled });
+		expect(res.stopReason).toBe("error");
+		expect(produce).toHaveBeenCalledTimes(6);
+		expect(onRetryScheduled).toHaveBeenCalledTimes(5);
+		expect(onRetryScheduled.mock.calls.map((call) => call[1])).toEqual([5, 5, 5, 5, 5]);
+	});
+
+	it("caps exponential backoff at ten minutes by default", async () => {
+		vi.useFakeTimers();
+		try {
+			let calls = 0;
+			const produce = vi.fn(async () => {
+				calls++;
+				return calls <= 3
+					? fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 unavailable" })
+					: fauxAssistantMessage("recovered");
+			});
+			const policy: RetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 400_000 };
+			const delays: number[] = [];
+			const result = retryAssistantCall(produce, policy, undefined, {
+				onRetryScheduled: (_attempt, _maxAttempts, delayMs) => {
+					delays.push(delayMs);
+				},
+			});
+			await vi.advanceTimersByTimeAsync(1_600_000);
+			await expect(result).resolves.toMatchObject({ stopReason: "stop" });
+			expect(delays).toEqual([400_000, 600_000, 600_000]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("retries a transient error up to maxRetries then returns the final error", async () => {

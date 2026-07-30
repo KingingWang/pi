@@ -11,6 +11,10 @@
 - Added page scrolling and marked-message navigation shortcuts to fullscreen mode.
 - Added an optional `scrollbarThumb` theme color for fullscreen scrollbar thumbs, falling back to `selectedBg`.
 
+### Changed
+
+- Changed automatic model retries to be unlimited by default with a 10-minute backoff cap, while limiting HTTP 401 failures to five retries and retrying stream disconnects, empty responses, and reasoning-only responses.
+
 ### Fixed
 
 - Fixed Kitty image previews in fullscreen mode overlapping the sticky editor and footer dock while scrolling.

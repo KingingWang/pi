@@ -137,12 +137,16 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--off
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `retry.enabled` | boolean | `true` | Enable automatic agent-level retry on transient errors |
-| `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts |
-| `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff (2s, 4s, 8s) |
+| `retry.enabled` | boolean | `true` | Enable automatic agent-level retry |
+| `retry.maxRetries` | number or null | `null` | Maximum agent-level retry attempts; `null` retries without a limit |
+| `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff |
+| `retry.maxBackoffMs` | number | `600000` | Maximum agent-level backoff delay (10 minutes) |
+| `retry.maxUnauthorizedRetries` | number | `5` | Maximum retry attempts for HTTP 401/authentication failures |
 | `retry.provider.timeoutMs` | number | SDK default | Provider/SDK request timeout in milliseconds |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay before failing (60s) |
+
+Agent-level retry covers HTTP provider errors, transport and stream disconnections, empty assistant responses, and responses containing only thinking without text or tool calls. HTTP 401/authentication failures remain bounded by `retry.maxUnauthorizedRetries`; other retryable failures use `retry.maxRetries`, which is unlimited by default. Exponential backoff never exceeds `retry.maxBackoffMs`.
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs`, the request fails immediately with an informative error instead of waiting silently. Set it to `0` to disable the limit.
 
@@ -152,8 +156,10 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 {
   "retry": {
     "enabled": true,
-    "maxRetries": 3,
+    "maxRetries": null,
     "baseDelayMs": 2000,
+    "maxBackoffMs": 600000,
+    "maxUnauthorizedRetries": 5,
     "provider": {
       "timeoutMs": 3600000,
       "maxRetries": 0,
@@ -287,7 +293,7 @@ See [packages.md](packages.md) for package management details.
   },
   "retry": {
     "enabled": true,
-    "maxRetries": 3
+    "maxRetries": null
   },
   "enabledModels": ["claude-*", "gpt-4o"],
   "warnings": {
