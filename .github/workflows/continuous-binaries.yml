@@ -1,0 +1,149 @@
+name: Continuous Binaries
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: continuous-binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Hydrate release model data
+        run: npm run hydrate:model-data
+
+      - name: Build standalone binaries
+        run: |
+          set -euo pipefail
+
+          ./scripts/build-binaries.sh \
+            --offline-model-data \
+            --out "${GITHUB_WORKSPACE}/packages/coding-agent/binaries"
+
+      - name: Prepare continuous build assets
+        run: |
+          set -euo pipefail
+
+          assets_dir="${GITHUB_WORKSPACE}/continuous-assets"
+          binaries_dir="${GITHUB_WORKSPACE}/packages/coding-agent/binaries"
+          mkdir -p "${assets_dir}"
+
+          binary_assets=(
+            pi-darwin-arm64.tar.gz
+            pi-darwin-x64.tar.gz
+            pi-linux-x64.tar.gz
+            pi-linux-arm64.tar.gz
+            pi-windows-x64.zip
+            pi-windows-arm64.zip
+          )
+
+          for asset in "${binary_assets[@]}"; do
+            test -f "${binaries_dir}/${asset}"
+            cp "${binaries_dir}/${asset}" "${assets_dir}/"
+          done
+
+          cd "${assets_dir}"
+          sha256sum "${binary_assets[@]}" > SHA256SUMS
+          {
+            printf 'repository=%s\n' "${GITHUB_REPOSITORY}"
+            printf 'commit=%s\n' "${GITHUB_SHA}"
+            printf 'ref=%s\n' "${GITHUB_REF}"
+            printf 'run=%s/%s/actions/runs/%s\n' "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
+          } > BUILD_INFO.txt
+
+      - name: Upload commit binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pi-binaries-${{ github.sha }}
+          path: continuous-assets/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  publish-continuous-release:
+    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      CONTINUOUS_TAG: continuous
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download commit binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pi-binaries-${{ github.sha }}
+          path: continuous-assets
+
+      - name: Validate commit binaries
+        run: |
+          set -euo pipefail
+
+          cd continuous-assets
+          sha256sum -c SHA256SUMS
+
+      - name: Publish rolling prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          cd continuous-assets
+          release_assets=(
+            pi-darwin-arm64.tar.gz
+            pi-darwin-x64.tar.gz
+            pi-linux-x64.tar.gz
+            pi-linux-arm64.tar.gz
+            pi-windows-x64.zip
+            pi-windows-arm64.zip
+            SHA256SUMS
+            BUILD_INFO.txt
+          )
+
+          if gh release view "${CONTINUOUS_TAG}" >/dev/null 2>&1; then
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${CONTINUOUS_TAG}" \
+              -f sha="${GITHUB_SHA}" \
+              -F force=true \
+              >/dev/null
+            gh release edit "${CONTINUOUS_TAG}" \
+              --prerelease \
+              --title "Continuous build" \
+              --notes-file BUILD_INFO.txt
+            gh release upload "${CONTINUOUS_TAG}" "${release_assets[@]}" --clobber
+          else
+            gh release create "${CONTINUOUS_TAG}" \
+              --target "${GITHUB_SHA}" \
+              --prerelease \
+              --title "Continuous build" \
+              --notes-file BUILD_INFO.txt \
+              "${release_assets[@]}"
+          fi
