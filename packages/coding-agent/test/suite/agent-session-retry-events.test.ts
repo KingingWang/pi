@@ -73,6 +73,68 @@ describe("AgentSession retry and event characterization", () => {
 		expect(harness.faux.state.callCount).toBe(3);
 	});
 
+	it("retries non-401 HTTP failures without a default attempt limit", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: true, baseDelayMs: 0 } } });
+		harnesses.push(harness);
+		harness.setResponses([
+			...Array.from({ length: 8 }, () =>
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 Service Unavailable" }),
+			),
+			fauxAssistantMessage("recovered"),
+		]);
+
+		await harness.session.prompt("test");
+
+		expect(harness.faux.state.callCount).toBe(9);
+		expect(harness.eventsOfType("auto_retry_start")).toHaveLength(8);
+		expect(harness.eventsOfType("auto_retry_start").every((event) => event.maxAttempts === null)).toBe(true);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([true]);
+	});
+
+	it("limits HTTP 401 failures to five retries", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: true, baseDelayMs: 0 } } });
+		harnesses.push(harness);
+		harness.setResponses(
+			Array.from({ length: 6 }, () =>
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 Unauthorized" }),
+			),
+		);
+
+		await harness.session.prompt("test");
+
+		expect(harness.faux.state.callCount).toBe(6);
+		expect(harness.eventsOfType("auto_retry_start")).toHaveLength(5);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.maxAttempts)).toEqual([5, 5, 5, 5, 5]);
+		expect(harness.eventsOfType("agent_end").map((event) => event.willRetry)).toEqual([
+			true,
+			true,
+			true,
+			true,
+			true,
+			false,
+		]);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([false]);
+	});
+
+	it("retries empty and reasoning-only assistant responses", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: true, baseDelayMs: 0 } } });
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([]),
+			fauxAssistantMessage([fauxThinking("analysis")]),
+			fauxAssistantMessage("recovered"),
+		]);
+
+		await harness.session.prompt("test");
+
+		expect(harness.faux.state.callCount).toBe(3);
+		expect(harness.eventsOfType("auto_retry_start").map((event) => event.errorMessage)).toEqual([
+			"Model returned an empty response",
+			"Model returned reasoning without text or tool calls",
+		]);
+		expect(harness.eventsOfType("auto_retry_end").map((event) => event.success)).toEqual([true]);
+	});
+
 	it("exhausts max retries and emits a failure event", async () => {
 		const harness = await createHarness({ settings: { retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 } } });
 		harnesses.push(harness);
@@ -135,7 +197,7 @@ describe("AgentSession retry and event characterization", () => {
 	it("does not retry non-retryable errors", async () => {
 		const harness = await createHarness({ settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } } });
 		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" })]);
+		harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "insufficient_quota" })]);
 
 		await harness.session.prompt("test");
 

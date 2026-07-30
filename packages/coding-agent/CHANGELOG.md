@@ -117,6 +117,10 @@
 - Added inherited optional cancellation to pi-ai `ModelsStore` reads, writes, and deletions; catalog orchestration binds these waits to the provider refresh signal.
 - Reduced the inherited default fullscreen mouse wheel step from three lines to one for finer scrolling.
 
+### Changed
+
+- Changed automatic model retries to be unlimited by default with a 10-minute backoff cap, while limiting HTTP 401 failures to five retries and retrying stream disconnects, empty responses, and reasoning-only responses.
+
 ### Fixed
 
 - Fixed the footer showing `(sub)` for generic OAuth/OpenID sign-ins without a known subscription; extension OAuth providers can opt in with `isSubscription`.

@@ -22,6 +22,10 @@
 
 - Fixed Windows path handling for `NodeExecutionEnv` file basenames, recursive skill loading, and prompt template names.
 
+### Changed
+
+- Changed summarization retry events to represent unlimited retry budgets with `maxAttempts: null`.
+
 ## [0.83.0] - 2026-07-29
 
 ## [0.82.1] - 2026-07-25

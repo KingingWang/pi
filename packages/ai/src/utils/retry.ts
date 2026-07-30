@@ -1,5 +1,8 @@
 import type { AssistantMessage } from "../types.ts";
 
+const DEFAULT_MAX_BACKOFF_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_UNAUTHORIZED_RETRIES = 5;
+
 function buildProviderErrorPattern(patterns: readonly string[]): RegExp {
 	return new RegExp(patterns.join("|"), "i");
 }
@@ -88,18 +91,59 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"ResourceExhausted",
 ]);
 
+const UNAUTHORIZED_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
+	"401",
+	"unauthorized",
+	"invalid.?api.?key",
+	"authentication.?failed",
+]);
+
+function parseHttpStatus(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+		return value;
+	}
+	if (typeof value === "string" && /^\d{3}$/.test(value)) {
+		const status = Number(value);
+		return status >= 100 && status <= 599 ? status : undefined;
+	}
+	return undefined;
+}
+
+function getAssistantErrorStatus(message: AssistantMessage): number | undefined {
+	for (let i = (message.diagnostics?.length ?? 0) - 1; i >= 0; i--) {
+		const diagnostic = message.diagnostics![i];
+		const status =
+			parseHttpStatus(diagnostic.details?.status) ??
+			parseHttpStatus(diagnostic.details?.statusCode) ??
+			parseHttpStatus(diagnostic.error?.code);
+		if (status !== undefined) return status;
+	}
+
+	const match = message.errorMessage?.match(/(?:^|[^\d])([45]\d{2})(?!\d)/);
+	return match ? Number(match[1]) : undefined;
+}
+
+function hasUsableAssistantOutput(message: AssistantMessage): boolean {
+	return message.content.some(
+		(content) => content.type === "toolCall" || (content.type === "text" && content.text.trim().length > 0),
+	);
+}
+
 /**
- * Retry policy: bounded attempts with exponential backoff (`baseDelayMs * 2^(attempt-1)`).
- * Matches `settings.retry` (`enabled`, `maxRetries`, `baseDelayMs`) in coding-agent; kept
- * here so the classifier and the policy-driven retry loop live together and stay reusable
- * by the SDK and other callers.
+ * Retry policy with exponential backoff (`baseDelayMs * 2^(attempt-1)`).
+ * A null `maxRetries` means retries are unbounded. Unauthorized responses have
+ * their own bounded retry budget, and backoff is capped to avoid growing forever.
  */
 export interface RetryPolicy {
 	enabled: boolean;
-	/** Max retry attempts (0 = no retries). The initial call never counts as a retry. */
-	maxRetries: number;
+	/** Max retry attempts (`null` = unlimited, `0` = no retries). The initial call never counts as a retry. */
+	maxRetries: number | null;
 	/** Base delay in ms. Per-attempt delay is `baseDelayMs * 2^(attempt-1)` before jitter. */
 	baseDelayMs: number;
+	/** Maximum exponential-backoff delay. Default: 600000 (10 minutes). */
+	maxBackoffMs?: number;
+	/** Maximum retry attempts for HTTP 401 responses. Default: 5. */
+	maxUnauthorizedRetries?: number;
 }
 
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */
@@ -107,7 +151,7 @@ export interface RetryCallbacks {
 	/** Emitted before the backoff sleep of each retry attempt (1-indexed). */
 	onRetryScheduled?: (
 		attempt: number,
-		maxAttempts: number,
+		maxAttempts: number | null,
 		delayMs: number,
 		errorMessage: string,
 	) => void | Promise<void>;
@@ -141,17 +185,29 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
+function retryLimitForResponse(message: AssistantMessage, policy: RetryPolicy): number | null {
+	if (!isUnauthorizedAssistantError(message)) return policy.maxRetries;
+	const unauthorizedLimit = policy.maxUnauthorizedRetries ?? DEFAULT_MAX_UNAUTHORIZED_RETRIES;
+	return policy.maxRetries === null ? unauthorizedLimit : Math.min(policy.maxRetries, unauthorizedLimit);
+}
+
+function getBackoffDelayMs(policy: RetryPolicy, attempt: number): number {
+	const maxBackoffMs = Math.max(0, policy.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS);
+	const exponentialDelayMs = policy.baseDelayMs * 2 ** (attempt - 1);
+	return Math.max(0, Math.min(exponentialDelayMs, maxBackoffMs));
+}
+
 /**
- * Run a single assistant-producing call with bounded retry on transient errors.
+ * Run a single assistant-producing call with policy-driven retry.
  *
  * Behavior:
  * - A successful response is returned immediately. Aborts are terminal and never
  *   retried, but reported as unsuccessful if they happen after a retry was scheduled.
  *   Aborts during the backoff sleep are normalized to an aborted `AssistantMessage`
  *   too, so callers do not need to care when cancellation happened.
- * - A non-retryable error (per {@link isRetryableAssistantError}, including quota/
- *   billing exhaustion) is returned immediately so deterministic errors fail fast.
- * - Otherwise retries up to `maxRetries` times with exponential backoff, emitting
+ * - HTTP/provider/transport failures, empty output, and reasoning-only output are
+ *   retried. HTTP 401 responses use their separate bounded retry budget.
+ * - Otherwise retries according to `maxRetries` with capped exponential backoff, emitting
  *   `onRetryScheduled` before each sleep, `onRetryAttemptStart` after each sleep before
  *   the retried call starts, and `onRetryFinished` once at the end (whether the loop
  *   ends in success, exhausted retries, or an aborted backoff).
@@ -165,9 +221,8 @@ export async function retryAssistantCall(
 	signal: AbortSignal | undefined,
 	callbacks?: RetryCallbacks,
 ): Promise<AssistantMessage> {
-	const maxAttempts = policy?.enabled ? policy.maxRetries : 0;
-
 	let attempt = 0;
+	let unauthorizedAttempts = 0;
 	let lastRetry: { attempt: number; errorMessage: string } | undefined;
 	for (;;) {
 		const response = await produce();
@@ -178,22 +233,34 @@ export async function retryAssistantCall(
 			return response;
 		}
 
-		// Success: non-error, non-abort responses return as-is.
-		if (response.stopReason !== "error") {
+		const retryError = getAssistantRetryErrorMessage(response);
+
+		// Success: usable non-error responses return as-is.
+		if (!retryError) {
 			if (lastRetry) await callbacks?.onRetryFinished?.(true, lastRetry.attempt);
 			return response;
 		}
 
-		// Non-retryable, or budget exhausted: return the final error message.
-		if (attempt >= maxAttempts || !isRetryableAssistantError(response)) {
+		if (!policy?.enabled || !isRetryableAssistantResponse(response)) {
 			if (lastRetry) await callbacks?.onRetryFinished?.(false, lastRetry.attempt, response.errorMessage);
 			return response;
 		}
 
+		const retryLimit = retryLimitForResponse(response, policy);
+		const unauthorized = isUnauthorizedAssistantError(response);
+		if (
+			(policy.maxRetries !== null && attempt >= policy.maxRetries) ||
+			(unauthorized && unauthorizedAttempts >= (policy.maxUnauthorizedRetries ?? DEFAULT_MAX_UNAUTHORIZED_RETRIES))
+		) {
+			if (lastRetry) await callbacks?.onRetryFinished?.(false, lastRetry.attempt, retryError);
+			return response;
+		}
+
 		attempt++;
-		lastRetry = { attempt, errorMessage: response.errorMessage || "Unknown error" };
-		const delayMs = policy!.baseDelayMs * 2 ** (attempt - 1);
-		await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
+		if (unauthorized) unauthorizedAttempts++;
+		lastRetry = { attempt, errorMessage: retryError };
+		const delayMs = getBackoffDelayMs(policy, attempt);
+		await callbacks?.onRetryScheduled?.(attempt, retryLimit, delayMs, lastRetry.errorMessage);
 
 		// Normalize aborts during retry backoff to the same AssistantMessage shape as
 		// provider stream aborts, so callers do not need to care when cancellation happened.
@@ -210,6 +277,15 @@ export async function retryAssistantCall(
 	}
 }
 
+/** Returns true when the assistant response is an HTTP 401 authentication failure. */
+export function isUnauthorizedAssistantError(message: AssistantMessage): boolean {
+	return (
+		message.stopReason === "error" &&
+		(getAssistantErrorStatus(message) === 401 ||
+			(message.errorMessage !== undefined && UNAUTHORIZED_PROVIDER_ERROR_PATTERN.test(message.errorMessage)))
+	);
+}
+
 /**
  * Classifies whether a failed assistant message looks like a transient provider
  * or transport error, so callers can decide if the last assistant turn should be
@@ -220,8 +296,33 @@ export async function retryAssistantCall(
  * before restarting the assistant turn.
  */
 export function isRetryableAssistantError(message: AssistantMessage): boolean {
-	if (message.stopReason !== "error" || !message.errorMessage) return false;
+	if (message.stopReason !== "error") return false;
+	if (getAssistantErrorStatus(message) !== undefined) return true;
+	if (!message.errorMessage) return false;
 	const errorMessage = message.errorMessage;
+	if (UNAUTHORIZED_PROVIDER_ERROR_PATTERN.test(errorMessage)) return true;
 	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
 	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+}
+
+/**
+ * Returns a user-visible retry reason for failed or unusable assistant responses.
+ * Thinking without text or a tool call is intentionally not considered usable output.
+ */
+export function getAssistantRetryErrorMessage(message: AssistantMessage): string | undefined {
+	if (message.stopReason === "error") {
+		return isRetryableAssistantError(message) ? message.errorMessage || "Unknown provider error" : undefined;
+	}
+	if (message.stopReason === "aborted" || message.stopReason === "pending" || hasUsableAssistantOutput(message)) {
+		return undefined;
+	}
+	const hasThinking = message.content.some(
+		(content) => content.type === "thinking" && content.thinking.trim().length > 0,
+	);
+	return hasThinking ? "Model returned reasoning without text or tool calls" : "Model returned an empty response";
+}
+
+/** Returns true when a finalized assistant response should be retried. */
+export function isRetryableAssistantResponse(message: AssistantMessage): boolean {
+	return getAssistantRetryErrorMessage(message) !== undefined;
 }

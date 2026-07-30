@@ -42,9 +42,10 @@ export class WorkingStatusIndicator extends StatusIndicator {
 export class RetryStatusIndicator extends StatusIndicator {
 	private countdown: CountdownTimer | undefined;
 
-	constructor(ui: TUI, attempt: number, maxAttempts: number, delayMs: number) {
+	constructor(ui: TUI, attempt: number, maxAttempts: number | null, delayMs: number) {
+		const retryProgress = maxAttempts === null ? `${attempt}/∞` : `${attempt}/${maxAttempts}`;
 		const retryMessage = (seconds: number) =>
-			`Retrying (${attempt}/${maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
+			`Retrying (${retryProgress}) in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
 		super(
 			"retry",
 			ui,
