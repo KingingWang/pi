@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed assistant retry policies to support unlimited retries, cap exponential backoff at 10 minutes, limit HTTP 401 failures to five retries, and retry empty or reasoning-only responses.
+
 ### Fixed
 
 - Updated GPT-5.6 Terra and Luna pricing across OpenAI and passthrough model catalogs.

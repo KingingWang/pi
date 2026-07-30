@@ -688,7 +688,7 @@ export interface RetryScheduledEvent {
 	type: "retry_scheduled";
 	operation: "compaction" | "branch_summary";
 	attempt: number;
-	maxAttempts: number;
+	maxAttempts: number | null;
 	delayMs: number;
 	errorMessage: string;
 }
