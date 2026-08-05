@@ -41,6 +41,12 @@ jobs:
         run: npm run hydrate:model-data
 
       - name: Build standalone binaries
+        env:
+          # The repo .npmrc sets min-release-age=2, which makes npm resolve
+          # dependencies as of two days ago. Recently published dependencies
+          # (e.g. grok-mermaid) then fail with ETARGET. Binaries track the
+          # latest main, so disable the age gate for the build installs.
+          npm_config_min_release_age: "0"
         run: |
           set -euo pipefail
 
