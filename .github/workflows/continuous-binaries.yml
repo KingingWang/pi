@@ -34,6 +34,9 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Upgrade npm
+        run: npm install --global npm@11.11.0
+
       - name: Hydrate release model data
         run: npm run hydrate:model-data
 
