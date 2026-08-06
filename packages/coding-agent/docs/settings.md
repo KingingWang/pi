@@ -122,13 +122,16 @@ See [Themes](themes.md) and [Terminal Setup](terminal-setup.md) for format and p
 | `httpProxy` | string | None | Proxy URL applied as `HTTP_PROXY` and `HTTPS_PROXY` for Pi-managed HTTP clients. **Can only be set in agent-directory settings.** |
 | `httpIdleTimeoutMs` | number | `300000` | HTTP header and body idle timeout in milliseconds. Set to `0` to disable. |
 | `websocketConnectTimeoutMs` | number | `15000` | WebSocket connection timeout in milliseconds. Set to `0` to disable. |
-| `retry.enabled` | boolean | `true` | Enable automatic agent-level retry for transient failures. |
-| `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts. |
-| `retry.baseDelayMs` | number | `2000` | Initial exponential-backoff delay in milliseconds. |
-| `retry.maxAgentDelayMs` | number | `60000` | Maximum agent-level retry delay in milliseconds. |
+| `retry.enabled` | boolean | `true` | Enable automatic agent-level retry. |
+| `retry.maxRetries` | number or null | `null` | Maximum agent-level retry attempts; `null` retries without a limit. |
+| `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff. |
+| `retry.maxBackoffMs` | number | `600000` | Maximum agent-level backoff delay (10 minutes). |
+| `retry.maxUnauthorizedRetries` | number | `5` | Maximum retry attempts for HTTP 401/authentication failures. |
 | `retry.provider.timeoutMs` | number | `httpIdleTimeoutMs` | Provider request timeout in milliseconds. |
 | `retry.provider.maxRetries` | number | `0` | Provider-level retry attempts. |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Maximum server-requested delay in milliseconds. Set to `0` to disable the limit. |
+
+Agent-level retry covers HTTP provider errors, transport and stream disconnections, empty assistant responses, and responses containing only thinking without text or tool calls. HTTP 401/authentication failures remain bounded by `retry.maxUnauthorizedRetries`; other retryable failures use `retry.maxRetries`, which is unlimited by default. Exponential backoff never exceeds `retry.maxBackoffMs`.
 
 Keep `retry.provider.maxRetries` at `0` unless provider-level retries are required. Provider retries can delay Pi from handling quota and usage-limit errors itself.
 

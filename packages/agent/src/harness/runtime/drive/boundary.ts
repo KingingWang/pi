@@ -46,7 +46,7 @@ export function normalizedRetryPolicy<TContext extends object | undefined>(
 ): NormalizedRetryPolicy {
 	const retry = lane.readConfig().retryPolicy;
 	return {
-		maxAttempts: retry.enabled ? retry.maxRetries + 1 : 1,
+		maxAttempts: retry.enabled ? (retry.maxRetries === null ? Number.POSITIVE_INFINITY : retry.maxRetries + 1) : 1,
 		baseDelayMs: retry.baseDelayMs,
 		maxAgentDelayMs: retry.maxAgentDelayMs ?? DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
 	};
