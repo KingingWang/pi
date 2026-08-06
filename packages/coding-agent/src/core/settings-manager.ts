@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { DEFAULT_MAX_AGENT_RETRY_DELAY_MS, type Model, type Transport } from "@earendil-works/pi-ai";
+import type { Model, Transport } from "@earendil-works/pi-ai";
 import type { TuiMode as RendererTuiMode, ScrollViewScrollbar, TerminalCapabilities } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -40,9 +40,10 @@ export interface ProviderRetrySettings {
 
 export interface RetrySettings {
 	enabled?: boolean; // default: true
-	maxRetries?: number; // default: 3
-	baseDelayMs?: number; // default: 2000 (exponential backoff: 2s, 4s, 8s)
-	maxAgentDelayMs?: number; // default: 60000
+	maxRetries?: number | null; // default: null (unlimited)
+	baseDelayMs?: number; // default: 2000 (exponential backoff)
+	maxBackoffMs?: number; // default: 600000 (10 minutes)
+	maxUnauthorizedRetries?: number; // default: 5
 	provider?: ProviderRetrySettings;
 }
 
@@ -929,12 +930,24 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number; maxAgentDelayMs: number } {
+	getRetrySettings(): {
+		enabled: boolean;
+		maxRetries: number | null;
+		baseDelayMs: number;
+		maxBackoffMs: number;
+		maxAgentDelayMs: number;
+		maxUnauthorizedRetries: number;
+	} {
+		const maxBackoffMs = this.settings.retry?.maxBackoffMs ?? 10 * 60 * 1000;
 		return {
 			enabled: this.getRetryEnabled(),
-			maxRetries: this.settings.retry?.maxRetries ?? 3,
+			maxRetries: this.settings.retry?.maxRetries ?? null,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
-			maxAgentDelayMs: this.settings.retry?.maxAgentDelayMs ?? DEFAULT_MAX_AGENT_RETRY_DELAY_MS,
+			maxBackoffMs,
+			// pi-ai RetryPolicy names the delay cap `maxAgentDelayMs`; keep both keys so the
+			// shared retryAssistantCall policy and the agent-level loop use the same cap.
+			maxAgentDelayMs: maxBackoffMs,
+			maxUnauthorizedRetries: this.settings.retry?.maxUnauthorizedRetries ?? 5,
 		};
 	}
 
