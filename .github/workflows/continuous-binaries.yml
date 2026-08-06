@@ -200,7 +200,7 @@ jobs:
           PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
 
       - name: Assemble npm distribution packages
-        run: node npm-dist/scripts/assemble.mjs --binaries ".dist-binaries/pi-binaries-${GITHUB_SHA}"
+        run: node npm-dist/scripts/assemble.mjs --binaries ".dist-binaries"
         env:
           PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
           PI_DIST_REPO: ${{ vars.PI_DIST_REPO }}
