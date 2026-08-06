@@ -1,17 +1,29 @@
 name: Publish npm dist package
 
 on:
+  workflow_run:
+    workflows: ["Continuous Binaries"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: publish-npm-dist
+  cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -19,14 +31,48 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Download binary archives from Continuous Binaries run
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          path: .dist-binaries
+
+      - name: Check published version
+        id: version
+        run: |
+          current="$(node -p "require('./packages/coding-agent/package.json').version")"
+          scope="${PI_NPM_SCOPE:-@kingingwang}"
+          published="$(npm view "${scope}/pi" version 2>/dev/null || true)"
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+          echo "published=${published}" >> "$GITHUB_OUTPUT"
+          echo "scope=${scope}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${published}" && "${current}" == "${published}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
+
       - name: Assemble npm distribution packages
-        run: node npm-dist/scripts/assemble.mjs --download continuous
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            node npm-dist/scripts/assemble.mjs --binaries ".dist-binaries/pi-binaries-${GITHUB_SHA}"
+          else
+            node npm-dist/scripts/assemble.mjs --download continuous
+          fi
         env:
           PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
           PI_DIST_REPO: ${{ vars.PI_DIST_REPO }}
 
       - name: Publish npm packages
+        if: ${{ steps.version.outputs.skip != 'true' }}
         run: node npm-dist/scripts/publish.mjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
+
+      - name: Skip publish (version already published)
+        if: ${{ steps.version.outputs.skip == 'true' }}
+        run: echo "Version ${{ steps.version.outputs.current }} is already published; skipping npm publish."

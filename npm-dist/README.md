@@ -67,8 +67,13 @@ npm update -g @kingingwang/pi
 
 ## CI publishing
 
-The `publish-npm-dist` workflow publishes the current `continuous` release on
-`workflow_dispatch`. Configure these repository settings first:
+The `publish-npm-dist` workflow runs automatically whenever the `Continuous
+Binaries` workflow finishes successfully on `main`. It downloads the binaries
+built by that run and publishes them to npm only when the package version differs
+from the version already published (checked against the main package on the
+registry). It can also be triggered manually with `workflow_dispatch`.
+
+Configure these repository settings first:
 
 - Secret `NPM_TOKEN`: an npm access token with publish rights for the scope.
 - Variable `PI_NPM_SCOPE`: the npm scope (defaults to `@kingingwang`).
