@@ -86,6 +86,7 @@
 ### Changed
 
 - Added optional cancellation to `ModelsStore` reads, writes, and deletions; catalog orchestration binds these waits to the provider refresh signal.
+- Changed assistant retry policies to support unlimited retries, cap exponential backoff at 10 minutes, limit HTTP 401 failures to five retries, and retry empty or reasoning-only responses.
 
 ### Fixed
 

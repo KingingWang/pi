@@ -35,6 +35,10 @@
 - Fixed `JsonlSessionRepo` enforcing session IDs globally across working directories; IDs are now unique within each working directory.
 - Fixed JSONL session forks and torn-tail repairs to publish atomically, avoiding partially written or corrupted sessions after interrupted writes ([#7707](https://github.com/earendil-works/pi/pull/7707) by [@davidbrai](https://github.com/davidbrai)).
 
+### Changed
+
+- Changed summarization retry events to represent unlimited retry budgets with `maxAttempts: null`.
+
 ## [0.83.0] - 2026-07-29
 
 ## [0.82.1] - 2026-07-25
