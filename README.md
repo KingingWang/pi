@@ -1,164 +1,86 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-</p>
+# Pi Fork
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+这是 [earendil-works/pi](https://github.com/earendil-works/pi) 的个人 Fork。
 
-# Pi
+本 README 只记录该 Fork 相对上游 `main` 的修改，以及本 Fork 发布版本的安装方式。Pi 的完整功能、配置、架构、开发和贡献文档请直接查看：
 
-Pi is a minimal, extensible agent harness that you can make your own.
+- [官方仓库：earendil-works/pi](https://github.com/earendil-works/pi)
+- [官方文档：pi.dev/docs/latest](https://pi.dev/docs/latest)
 
-Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
+## Fork 修改
 
-Pi ships with powerful defaults but skips features like sub-agents and plan mode. Ask Pi to build what you want, or install a package that does it your way.
+### 1. 更稳健的模型自动重试
 
-Use Pi [interactively](packages/coding-agent/docs/usage.md), automate it in [print or JSON mode](packages/coding-agent/docs/cli.md), control it over [RPC](packages/coding-agent/docs/rpc.md), or build apps with the [Pi TypeScript SDK](packages/coding-agent/docs/sdk.md). See [OpenClaw](https://github.com/OpenClaw/OpenClaw) for a real-world integration.
+- 自动重试默认不限制总次数，也可以通过 `retry.maxRetries` 设置上限。
+- 指数退避最长为 10 分钟，可通过 `retry.maxBackoffMs` 调整。
+- HTTP 401 或认证失败单独限制为最多重试 5 次，可通过 `retry.maxUnauthorizedRetries` 调整。
+- 除 HTTP、服务商和传输错误外，也会重试流中断、空响应，以及只有推理内容但没有文本或工具调用的响应。
+- 重试等待仍可由用户中断。
 
-## Getting started
+### 2. 独立 npm 包与多平台二进制
 
-Install the command-line interface:
+本 Fork 发布独立的 npm 包 [`@kingingwang/pi`](https://www.npmjs.com/package/@kingingwang/pi)。主包提供 `pi` 命令，并通过 `optionalDependencies` 只安装当前系统对应的预编译二进制。
 
-```bash
-curl -fsSL https://pi.dev/install.sh | sh
+支持的平台：
+
+| 系统 | 架构 | 二进制包 |
+| --- | --- | --- |
+| macOS | Apple Silicon | `@kingingwang/pi-darwin-arm64` |
+| macOS | Intel | `@kingingwang/pi-darwin-x64` |
+| Linux | x64 | `@kingingwang/pi-linux-x64` |
+| Linux | ARM64 | `@kingingwang/pi-linux-arm64` |
+| Windows | x64 | `@kingingwang/pi-windows-x64` |
+| Windows | ARM64 | `@kingingwang/pi-windows-arm64` |
+
+相关 CI 会：
+
+- 在每次分支推送后构建六个平台的独立二进制。
+- 在默认分支更新后发布滚动的 `continuous` GitHub Release。
+- 当当前版本尚未发布时，自动将平台包和主包发布到 npm。
+- 提供手动 npm 发布工作流，用于失败重试或自定义发布。
+
+### 3. OpenAI 兼容 API 扩展
+
+#### 非流式 Chat Completions
+
+`openai-completions` API 支持 `nonStreaming: true`。启用后会发送单次 `stream: false` 请求，并将完整响应中的文本、推理内容、工具调用和用量信息转换为现有事件流格式；默认行为仍为流式请求。
+
+#### OpenAI Responses 后台任务
+
+OpenAI provider 支持 `streamSimple({ deferred: true })`：
+
+- 使用 `stream: false` 和 `background: true` 提交后台响应。
+- 请求未完成时返回可持久化的 deferred handle。
+- 使用 `fetchDeferred` 获取任务状态或最终结果。
+- 使用 `cancelDeferred` 取消仍在执行的任务。
+
+该后台任务能力当前仅适用于 OpenAI provider。
+
+## 安装
+
+要求 Node.js 18 或更高版本。
+
+如果已经全局安装官方 CLI，请先卸载，避免两个包同时提供 `pi` 命令：
+
+```sh
+npm uninstall -g @earendil-works/pi-coding-agent
 ```
 
-On Windows:
+安装本 Fork 发布的 CLI：
 
-```shell
-powershell -c "irm https://pi.dev/install.ps1 | iex"
+```sh
+npm install -g @kingingwang/pi
 ```
 
-The installer pins all dependencies and updates Pi with `pi update`. Alternatively, install directly with npm, which does not pin transitive dependencies:
+验证安装：
 
-```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```sh
+pi --version
+pi --help
 ```
 
-Pi requires Node.js 22.19 or newer. The macOS, Linux, and Windows installers can install it if needed. Pi does not require dependency lifecycle scripts for a normal npm installation.
+更新到 npm 上的最新版本：
 
-Start Pi in the directory where you want it to work:
-
-```bash
-cd /path/to/project
-pi
+```sh
+npm update -g @kingingwang/pi
 ```
-
-For a built-in AI provider, run `/login` inside Pi to connect a subscription or API key. Then give Pi a task.
-
-See the [documentation](https://pi.dev/docs/latest) for full setup and usage instructions, or [visit pi.dev](https://pi.dev) for demos.
-
-## Run with Nix
-
-```bash
-nix run github:earendil-works/pi/stable
-```
-
-`stable` points at the latest release. Install it with `nix profile add github:earendil-works/pi/stable` and update with `nix profile upgrade pi`. Use a release tag such as `github:earendil-works/pi/v1.0.0` to pin a version, or `github:earendil-works/pi` for unreleased changes on `main`. Nix builds Pi from source.
-
-Supports ARM64 and x86-64 on Linux and macOS. Use `nix build .` or `nix run .` to build or run your checkout.
-
-Nix builds are offline, so the bundled model data comes from a pi.dev model catalog revision pinned in `nix/model-catalog.json`. At runtime, Pi still overlays newer catalog data from pi.dev as usual. The Nix workflow replaces the pin on `main` when it no longer matches the checkout, for example after a provider is added or gains a new model type. To refresh it by hand:
-
-```bash
-npm run update:model-catalog-pin
-```
-
-## Packages
-
-This monorepo contains the Pi CLI and its supporting libraries.
-
-| Package | Description |
-|---------|-------------|
-| **[@earendil-works/chord](packages/chord)** | Standalone application-composition runtime for services, replicated state, RPC, and plugins |
-| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
-| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pi-durable](packages/durable)** | Durable conversation, task, and document runtime |
-| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
-
-## Permissions & Containerization
-
-Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.
-
-If you need stronger boundaries, containerize or sandbox Pi. See [packages/coding-agent/docs/containerization.md](packages/coding-agent/docs/containerization.md) for three patterns:
-
-- **Gondolin extension**: keep `pi` and provider auth on the host while routing built-in tools and `!` commands into a local Linux micro-VM.
-- **Plain Docker**: run the whole `pi` process in a local container for simple isolation.
-- **OpenShell**: run the whole `pi` process in a policy-controlled sandbox.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
-
-## Development
-
-```bash
-npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build         # Refresh model data, then build all packages
-npm run build:offline # Rebuild using existing model data without network access
-npm run check         # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
-```
-
-## Building standalone binaries from release source
-
-GitHub releases include a versioned source archive covered by the release's `SHA256SUMS` file. Extract it and run the same build script used for the official standalone binaries:
-
-```bash
-VERSION="<release-version>"
-tar -xzf "pi-${VERSION}-source.tar.gz"
-cd "pi-${VERSION}"
-./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
-```
-
-The archive includes release model data and native prebuilds. `--offline-model-data` uses that model data without refreshing provider catalogs. The script installs dependencies and builds the executable with its runtime assets; pass `--skip-install` if dependencies are already provided.
-
-## Supply-chain hardening
-
-We treat npm dependency changes as reviewed code changes.
-
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
-- `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
-- `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent install lock.
-- The pi.dev installer installs from `packages/coding-agent/install-lock/`, generated from the root lockfile, to pin transitive deps. The npm package does not pin transitive deps.
-- Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
-- Local release installs, documented npm installs, and `pi update --self` use `--ignore-scripts` where supported.
-- CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Install lock generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
-
-## Share your OSS coding agent sessions
-
-If you use Pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
-
-## License
-
-MIT
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
