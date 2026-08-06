@@ -375,15 +375,24 @@ describe("SettingsManager", () => {
 		it("defaults and overrides agent retry delay cap", () => {
 			expect(SettingsManager.inMemory().getRetrySettings()).toEqual({
 				enabled: true,
-				maxRetries: 3,
+				maxRetries: null,
 				baseDelayMs: 2000,
-				maxAgentDelayMs: 60000,
+				maxBackoffMs: 600000,
+				maxAgentDelayMs: 600000,
+				maxUnauthorizedRetries: 5,
 			});
 			expect(
 				SettingsManager.inMemory({
-					retry: { enabled: true, maxRetries: 10, baseDelayMs: 500, maxAgentDelayMs: 5000 },
+					retry: { enabled: true, maxRetries: 10, baseDelayMs: 500, maxBackoffMs: 5000 },
 				}).getRetrySettings(),
-			).toEqual({ enabled: true, maxRetries: 10, baseDelayMs: 500, maxAgentDelayMs: 5000 });
+			).toEqual({
+				enabled: true,
+				maxRetries: 10,
+				baseDelayMs: 500,
+				maxBackoffMs: 5000,
+				maxAgentDelayMs: 5000,
+				maxUnauthorizedRetries: 5,
+			});
 		});
 	});
 

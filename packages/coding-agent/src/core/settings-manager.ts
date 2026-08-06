@@ -888,12 +888,25 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number; maxAgentDelayMs: number } {
+	getRetrySettings(): {
+		enabled: boolean;
+		maxRetries: number | null;
+		baseDelayMs: number;
+		maxBackoffMs: number;
+		maxAgentDelayMs: number;
+		maxUnauthorizedRetries: number;
+	} {
+		const maxBackoffMs = this.settings.retry?.maxBackoffMs ?? SETTINGS_DEFAULTS.retry.maxBackoffMs;
 		return {
 			enabled: this.getRetryEnabled(),
 			maxRetries: this.settings.retry?.maxRetries ?? SETTINGS_DEFAULTS.retry.maxRetries,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? SETTINGS_DEFAULTS.retry.baseDelayMs,
-			maxAgentDelayMs: this.settings.retry?.maxAgentDelayMs ?? SETTINGS_DEFAULTS.retry.maxAgentDelayMs,
+			maxBackoffMs,
+			// pi-ai RetryPolicy names the delay cap `maxAgentDelayMs`; keep both keys so the
+			// shared retryAssistantCall policy and the agent-level loop use the same cap.
+			maxAgentDelayMs: maxBackoffMs,
+			maxUnauthorizedRetries:
+				this.settings.retry?.maxUnauthorizedRetries ?? SETTINGS_DEFAULTS.retry.maxUnauthorizedRetries,
 		};
 	}
 

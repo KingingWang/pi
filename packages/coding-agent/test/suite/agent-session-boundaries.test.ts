@@ -881,14 +881,16 @@ describe("durable length recovery", () => {
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" }),
+			// Fork note: "invalid_api_key" is retryable under the fork's bounded
+			// retry.maxUnauthorizedRetries policy; a quota error is hard-nonretryable.
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "insufficient_quota" }),
 		]);
 
 		await harness.session.prompt("start");
 
 		expect(harness.faux.state.callCount).toBe(2);
 		expect(harness.eventsOfType("auto_retry_end")).toContainEqual(
-			expect.objectContaining({ success: false, attempt: 1, finalError: "invalid_api_key" }),
+			expect.objectContaining({ success: false, attempt: 1, finalError: "insufficient_quota" }),
 		);
 	});
 

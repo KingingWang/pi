@@ -54,14 +54,31 @@ const ProviderRetrySettingsSchema = Type.Object({
 
 const RetrySettingsSchema = Type.Object({
 	enabled: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.retry.enabled })),
-	maxRetries: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.retry.maxRetries })),
+	maxRetries: Type.Optional(
+		Type.Union([Type.Number(), Type.Null()], {
+			description: "Maximum agent-level retry attempts; null retries without a limit.",
+			default: SETTINGS_DEFAULTS.retry.maxRetries,
+		}),
+	),
 	baseDelayMs: Type.Optional(
 		Type.Number({
 			description: "Exponential backoff base delay in milliseconds: 2s, 4s, 8s.",
 			default: SETTINGS_DEFAULTS.retry.baseDelayMs,
 		}),
 	),
+	maxBackoffMs: Type.Optional(
+		Type.Number({
+			description: "Maximum agent-level backoff delay in milliseconds (10 minutes default).",
+			default: SETTINGS_DEFAULTS.retry.maxBackoffMs,
+		}),
+	),
 	maxAgentDelayMs: Type.Optional(Type.Number({ default: SETTINGS_DEFAULTS.retry.maxAgentDelayMs })),
+	maxUnauthorizedRetries: Type.Optional(
+		Type.Number({
+			description: "Maximum retry attempts for HTTP 401/authentication failures.",
+			default: SETTINGS_DEFAULTS.retry.maxUnauthorizedRetries,
+		}),
+	),
 	provider: Type.Optional(ProviderRetrySettingsSchema),
 	maxDelayMs: Type.Optional(
 		Type.Number({
