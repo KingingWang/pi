@@ -1,0 +1,20 @@
+{
+	"name": "__MAIN_PACKAGE__",
+	"version": "__VERSION__",
+	"description": "Pi: AI coding agent CLI (fork distribution)",
+	"license": "MIT",
+	"bin": {
+		"pi": "bin/pi.js"
+	},
+	"files": [
+		"bin",
+		"README.md",
+		"LICENSE"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"optionalDependencies": __OPTIONAL_DEPENDENCIES__,
+	"homepage": "__HOMEPAGE__",
+	"repository": __REPOSITORY__
+}
