@@ -1,11 +1,13 @@
 import OpenAI from "openai";
 import type {
+	ChatCompletion,
 	ChatCompletionAssistantMessageParam,
 	ChatCompletionChunk,
 	ChatCompletionContentPart,
 	ChatCompletionContentPartImage,
 	ChatCompletionContentPartText,
 	ChatCompletionDeveloperMessageParam,
+	ChatCompletionMessage,
 	ChatCompletionMessageParam,
 	ChatCompletionMessageToolCall,
 	ChatCompletionSystemMessageParam,
@@ -23,6 +25,7 @@ import type {
 	OpenAICompletionsCompat,
 	ProviderEnv,
 	ProviderHeaders,
+	ProviderResponse,
 	SimpleStreamOptions,
 	StopReason,
 	StreamFunction,
@@ -144,6 +147,8 @@ export interface OpenAICompletionsOptions extends StreamOptions {
 	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	/** Token budgets per thinking level. Only used when `compat.supportsThinkingTokenBudget` is set. */
 	thinkingBudgets?: ThinkingBudgets;
+	/** Issue a single non-streaming completion request (`stream: false`). */
+	nonStreaming?: boolean;
 }
 
 export interface ConvertCompletionsMessagesOptions {
@@ -197,6 +202,127 @@ function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEn
 	return "short";
 }
 
+function createRequestOptions(options: StreamOptions | undefined) {
+	return {
+		...(options?.signal ? { signal: options.signal } : {}),
+		...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
+		maxRetries: 0,
+	};
+}
+
+function createRetryOptions(options: StreamOptions | undefined) {
+	return {
+		maxRetries: options?.maxRetries,
+		maxRetryDelayMs: options?.maxRetryDelayMs,
+		signal: options?.signal,
+	};
+}
+
+type CreatedCompletion =
+	| { kind: "stream"; events: AsyncIterable<ChatCompletionChunk>; httpResponse: ProviderResponse }
+	| { kind: "completion"; value: ChatCompletion; httpResponse: ProviderResponse };
+
+// Create params without the stream discriminator so the union members can be
+// spread into a concrete streaming or non-streaming request safely.
+type OpenAICompletionsCreateParams = Omit<OpenAI.Chat.Completions.ChatCompletionCreateParams, "stream"> & {
+	stream?: boolean;
+};
+
+async function executeCreateRequest(
+	client: OpenAI,
+	nonStreaming: boolean,
+	params: OpenAICompletionsCreateParams,
+	options: StreamOptions | undefined,
+): Promise<CreatedCompletion> {
+	if (!nonStreaming) {
+		const streamingParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+			...params,
+			stream: true,
+		};
+		const { data, response } = await retryProviderRequest(
+			() => client.chat.completions.create(streamingParams, createRequestOptions(options)).withResponse(),
+			createRetryOptions(options),
+		);
+		return {
+			kind: "stream",
+			events: data,
+			httpResponse: { status: response.status, headers: headersToRecord(response.headers) },
+		};
+	}
+
+	const nonStreamingParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+		...params,
+		stream: false,
+	};
+	const { data, response } = await retryProviderRequest(
+		() => client.chat.completions.create(nonStreamingParams, createRequestOptions(options)).withResponse(),
+		createRetryOptions(options),
+	);
+	return {
+		kind: "completion",
+		value: data,
+		httpResponse: { status: response.status, headers: headersToRecord(response.headers) },
+	};
+}
+
+async function* completionToChunkStream(completion: ChatCompletion): AsyncIterable<ChatCompletionChunk> {
+	const choice = completion.choices?.[0];
+	if (!choice) {
+		throw new Error("OpenAI non-streaming completion omitted its first choice");
+	}
+	const message = choice.message as ChatCompletionMessage & Record<string, unknown>;
+	const delta: Record<string, unknown> = {
+		content: message.content ?? null,
+	};
+
+	for (const field of ["reasoning_content", "reasoning", "reasoning_text"]) {
+		const value = message[field];
+		if (typeof value === "string" && value.length > 0) {
+			delta[field] = value;
+		}
+	}
+
+	const reasoningDetails = message.reasoning_details;
+	if (Array.isArray(reasoningDetails)) {
+		delta.reasoning_details = reasoningDetails;
+	}
+
+	if (message.tool_calls && message.tool_calls.length > 0) {
+		delta.tool_calls = message.tool_calls.map((toolCall, index) => {
+			if (toolCall.type === "function") {
+				return {
+					index,
+					id: toolCall.id,
+					type: "function",
+					function: {
+						name: toolCall.function.name,
+						arguments: toolCall.function.arguments,
+					},
+				};
+			}
+			return {
+				index,
+				id: toolCall.id,
+				type: "custom",
+				custom: {
+					name: toolCall.custom.name,
+					input: toolCall.custom.input,
+				},
+			};
+		});
+	}
+
+	const finishReason = choice.finish_reason ?? (message.tool_calls?.length ? "tool_calls" : "stop");
+	yield {
+		id: completion.id,
+		object: "chat.completion.chunk",
+		created: completion.created,
+		model: completion.model,
+		choices: [{ index: 0, delta, finish_reason: finishReason, logprobs: null }],
+		usage: completion.usage ?? undefined,
+	} as unknown as ChatCompletionChunk;
+}
+
 export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptions> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -225,6 +351,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 
 		try {
 			const apiKey = getClientApiKey(model.provider, options?.apiKey, options?.headers);
+			const nonStreaming = options?.nonStreaming === true;
 			const compat = getCompat(model);
 			const grammarToolInputProperties = createGrammarToolInputProperties(
 				context.tools,
@@ -233,26 +360,25 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 			const client = createClient(model, context, apiKey, options?.headers, options?.fetch, cacheSessionId, compat);
-			let params = buildParams(model, context, options, compat, cacheRetention, grammarToolInputProperties);
+			let params: OpenAICompletionsCreateParams = buildParams(
+				model,
+				context,
+				options,
+				nonStreaming,
+				compat,
+				cacheRetention,
+				grammarToolInputProperties,
+			);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
-				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+				params = nextParams as OpenAICompletionsCreateParams;
 			}
-			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-				maxRetries: 0,
-			};
-			const { data: openaiStream, response } = await retryProviderRequest(
-				() => client.chat.completions.create(params, requestOptions).withResponse(),
-				{
-					maxRetries: options?.maxRetries,
-					maxRetryDelayMs: options?.maxRetryDelayMs,
-					signal: options?.signal,
-				},
-			);
-			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
+
+			const created = await executeCreateRequest(client, nonStreaming, params, options);
+			await options?.onResponse?.(created.httpResponse, model);
 			stream.push({ type: "start", partial: output });
+			const openaiStream: AsyncIterable<ChatCompletionChunk> =
+				created.kind === "stream" ? created.events : completionToChunkStream(created.value);
 
 			interface StreamingToolCallBlock extends ToolCall {
 				partialArgs?: string;
@@ -630,6 +756,7 @@ export const streamSimple: StreamFunction<"openai-completions", SimpleStreamOpti
 		reasoningEffort,
 		toolChoice,
 		thinkingBudgets: options?.thinkingBudgets,
+		nonStreaming: options?.nonStreaming,
 	} satisfies OpenAICompletionsOptions);
 };
 
@@ -682,6 +809,7 @@ function buildParams(
 	model: Model<"openai-completions">,
 	context: Context,
 	options?: OpenAICompletionsOptions,
+	nonStreaming: boolean = false,
 	compat: ResolvedOpenAICompletionsCompat = getCompat(model),
 	cacheRetention: CacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env),
 	grammarToolInputProperties: ReadonlyMap<string, string> = createGrammarToolInputProperties(
@@ -692,10 +820,9 @@ function buildParams(
 	const messages = convertMessages(model, context, compat, { grammarToolInputProperties });
 	const cacheControl = getCompatCacheControl(compat, cacheRetention);
 
-	const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+	const params: OpenAICompletionsCreateParams = {
 		model: model.id,
 		messages,
-		stream: true,
 		prompt_cache_key:
 			(model.baseUrl.includes("api.openai.com") && cacheRetention !== "none") ||
 			(cacheRetention === "long" && compat.supportsLongCacheRetention)
@@ -704,7 +831,7 @@ function buildParams(
 		prompt_cache_retention: cacheRetention === "long" && compat.supportsLongCacheRetention ? "24h" : undefined,
 	};
 
-	if (compat.supportsUsageInStreaming !== false) {
+	if (!nonStreaming && compat.supportsUsageInStreaming !== false) {
 		(params as any).stream_options = { include_usage: true };
 	}
 
