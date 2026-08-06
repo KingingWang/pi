@@ -17,14 +17,19 @@ export function validateToolNames(tools: readonly { name: string }[]): void {
 }
 
 export function validateRetryPolicy(policy: RetryPolicy): void {
+	const maxRetriesValid =
+		policy.maxRetries === null ||
+		(Number.isSafeInteger(policy.maxRetries) &&
+			policy.maxRetries >= 0 &&
+			policy.maxRetries !== Number.MAX_SAFE_INTEGER);
 	if (
-		!Number.isSafeInteger(policy.maxRetries) ||
-		policy.maxRetries < 0 ||
-		policy.maxRetries === Number.MAX_SAFE_INTEGER ||
+		!maxRetriesValid ||
 		!Number.isSafeInteger(policy.baseDelayMs) ||
 		policy.baseDelayMs < 0 ||
 		(policy.maxAgentDelayMs !== undefined &&
-			(!Number.isSafeInteger(policy.maxAgentDelayMs) || policy.maxAgentDelayMs < 0))
+			(!Number.isSafeInteger(policy.maxAgentDelayMs) || policy.maxAgentDelayMs < 0)) ||
+		(policy.maxUnauthorizedRetries !== undefined &&
+			(!Number.isSafeInteger(policy.maxUnauthorizedRetries) || policy.maxUnauthorizedRetries < 0))
 	) {
 		throw new RangeError("Retry policy values must be finite non-negative safe integers");
 	}
