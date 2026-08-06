@@ -45,7 +45,10 @@ export function normalizedRetryPolicy<TContext extends object | undefined>(
 ): NormalizedRetryPolicy {
 	const retry = lane.readConfig().retryPolicy;
 	return retry.enabled
-		? { maxAttempts: retry.maxRetries + 1, baseDelayMs: retry.baseDelayMs }
+		? {
+				maxAttempts: retry.maxRetries === null ? Number.POSITIVE_INFINITY : retry.maxRetries + 1,
+				baseDelayMs: retry.baseDelayMs,
+			}
 		: { maxAttempts: 1, baseDelayMs: retry.baseDelayMs };
 }
 
