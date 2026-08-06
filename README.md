@@ -1,114 +1,86 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-</p>
+# Pi Fork
 
-# Pi Agent Harness (Fork)
+这是 [earendil-works/pi](https://github.com/earendil-works/pi) 的个人 Fork。
 
-This is a fork of [earendil-works/pi](https://github.com/earendil-works/pi) with standalone npm distribution packages, non-streaming chat completions, background responses, and resilient retry improvements.
+本 README 只记录该 Fork 相对上游同步点 `9859eaa` 的修改，以及本 Fork 发布版本的安装方式。Pi 的完整功能、配置、架构、开发和贡献文档请直接查看：
 
-## What's different from upstream
+- [官方仓库：earendil-works/pi](https://github.com/earendil-works/pi)
+- [官方文档：pi.dev/docs/latest](https://pi.dev/docs/latest)
 
-This fork adds the following changes on top of [earendil-works/pi](https://github.com/earendil-works/pi):
+## Fork 修改
 
-### Standalone npm distribution packages
+### 1. 更稳健的模型自动重试
 
-The upstream project publishes monorepo packages (`@earendil-works/pi-*`). This fork ships standalone npm packages that bundle per-platform prebuilt binaries, making installation as simple as `npm install -g @kingingwang/pi` without requiring a local build.
+- 自动重试默认不限制总次数，也可以通过 `retry.maxRetries` 设置上限。
+- 指数退避最长为 10 分钟，可通过 `retry.maxBackoffMs` 调整。
+- HTTP 401 或认证失败单独限制为最多重试 5 次，可通过 `retry.maxUnauthorizedRetries` 调整。
+- 除 HTTP、服务商和传输错误外，也会重试流中断、空响应，以及只有推理内容但没有文本或工具调用的响应。
+- 重试等待仍可由用户中断。
 
-- **`@kingingwang/pi`** — main package with the `pi` bin wrapper
-- **`@kingingwang/pi-darwin-arm64`** — macOS Apple Silicon binary
-- **`@kingingwang/pi-darwin-x64`** — macOS Intel binary
-- **`@kingingwang/pi-linux-x64`** — Linux x64 binary
-- **`@kingingwang/pi-linux-arm64`** — Linux ARM64 binary
-- **`@kingingwang/pi-windows-x64`** — Windows x64 binary
-- **`@kingingwang/pi-windows-arm64`** — Windows ARM64 binary
+### 2. 独立 npm 包与多平台二进制
 
-The main package uses `optionalDependencies` to pull in only the binary for the current platform.
+本 Fork 发布独立的 npm 包 [`@kingingwang/pi`](https://www.npmjs.com/package/@kingingwang/pi)。主包提供 `pi` 命令，并通过 `optionalDependencies` 只安装当前系统对应的预编译二进制。
 
-### Non-streaming chat completions
+支持的平台：
 
-Added a `nonStreaming` option to the OpenAI Completions API (`OpenAICompletionsOptions` and `SimpleStreamOptions`). When set to `true`, the API issues a single non-streaming request and internally converts the result back to a chunk stream. This is useful for providers or scenarios where streaming is unavailable or undesired.
+| 系统 | 架构 | 二进制包 |
+| --- | --- | --- |
+| macOS | Apple Silicon | `@kingingwang/pi-darwin-arm64` |
+| macOS | Intel | `@kingingwang/pi-darwin-x64` |
+| Linux | x64 | `@kingingwang/pi-linux-x64` |
+| Linux | ARM64 | `@kingingwang/pi-linux-arm64` |
+| Windows | x64 | `@kingingwang/pi-windows-x64` |
+| Windows | ARM64 | `@kingingwang/pi-windows-arm64` |
 
-### Background / deferred responses (OpenAI Responses API)
+相关 CI 会：
 
-Added support for the OpenAI Responses API `background` mode. When `background: true` is passed in the stream options, the API issues a non-streaming request and returns a deferred handle. The response can be polled or awaited later. This works with the `deferred` option on `SimpleStreamOptions`.
+- 在每次分支推送后构建六个平台的独立二进制。
+- 在默认分支更新后发布滚动的 `continuous` GitHub Release。
+- 当当前版本尚未发布时，自动将平台包和主包发布到 npm。
+- 提供手动 npm 发布工作流，用于失败重试或自定义发布。
 
-### Resilient model retries
+### 3. OpenAI 兼容 API 扩展
 
-Improved the retry logic in `AgentSession`:
+#### 非流式 Chat Completions
 
-- Renamed `isRetryableAssistantError` to `isRetryableAssistantResponse` for broader coverage
-- Added `isUnauthorizedAssistantError` helper to distinguish auth failures from recoverable errors
-- Added `getAssistantRetryErrorMessage` for consistent error messages
-- Made `maxAttempts` nullable in retry events, enabling unbounded retries when configured
-- Added `_unauthorizedRetryAttempt` tracking and `_hasRetryBudget` checks
-- Reset retry state via `_resetRetryState()` instead of directly zeroing the counter
+`openai-completions` API 支持 `nonStreaming: true`。启用后会发送单次 `stream: false` 请求，并将完整响应中的文本、推理内容、工具调用和用量信息转换为现有事件流格式；默认行为仍为流式请求。
 
-### Removed `qwen-token-plan-individual` provider
+#### OpenAI Responses 后台任务
 
-The `qwen-token-plan-individual` provider was removed from this fork. The `qwen-token-plan` and `qwen-token-plan-cn` providers remain available.
+OpenAI provider 支持 `streamSimple({ deferred: true })`：
 
-### Harness and agent fixes
+- 使用 `stream: false` 和 `background: true` 提交后台响应。
+- 请求未完成时返回可持久化的 deferred handle。
+- 使用 `fetchDeferred` 获取任务状态或最终结果。
+- 使用 `cancelDeferred` 取消仍在执行的任务。
 
-- Simplified blocked tool result handling in `agent-loop.ts`
-- Removed the active-run guard on `Agent.reset()` in `agent.ts`
-- Expanded `ExecutionContext` and `ExecutionSpan` interfaces in `agent-harness.ts`
-- Fixed unused import and path handling in `nodejs.ts` environment
+该后台任务能力当前仅适用于 OpenAI provider。
 
-### CI/CD
+## 安装
 
-- **Continuous Binaries** workflow: builds standalone binaries on every push to any branch, publishes a rolling `continuous` GitHub release on the default branch
-- **Publish npm dist** workflow: auto-publishes the npm packages after a successful continuous build, with a manual `workflow_dispatch` trigger for retries
+要求 Node.js 18 或更高版本。
 
----
-
-## Install
-
-```sh
-# Install the standalone CLI
-npm install -g @kingingwang/pi
-
-# Verify
-pi --version
-pi --help
-```
-
-If you previously installed the upstream CLI, uninstall it first to avoid conflicts:
+如果已经全局安装官方 CLI，请先卸载，避免两个包同时提供 `pi` 命令：
 
 ```sh
 npm uninstall -g @earendil-works/pi-coding-agent
 ```
 
-## Update
+安装本 Fork 发布的 CLI：
+
+```sh
+npm install -g @kingingwang/pi
+```
+
+验证安装：
+
+```sh
+pi --version
+pi --help
+```
+
+更新到 npm 上的最新版本：
 
 ```sh
 npm update -g @kingingwang/pi
 ```
-
-## Usage
-
-```sh
-pi --help
-pi --version
-pi -p "your prompt"
-```
-
----
-
-## Upstream project
-
-For the full project documentation, feature list, architecture details, and contribution guidelines, please refer to the original repository:
-
-- **Repository**: [earendil-works/pi](https://github.com/earendil-works/pi)
-- **Website**: [pi.dev](https://pi.dev)
-- **Documentation**: [pi.dev/docs](https://pi.dev/docs/latest)
-
-Upstream packages and detailed documentation are maintained at the original repository. This fork only adds the standalone npm distribution and the modifications listed above.
-
-## License
-
-MIT
