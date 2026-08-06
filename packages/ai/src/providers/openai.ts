@@ -19,6 +19,6 @@ export function openaiProvider(): Provider<"openai-responses"> {
 			}),
 		},
 		models: Object.values(OPENAI_MODELS),
-		api: openAIResponsesApi(),
+		api: openAIResponsesApi({ fetchDeferred: true, cancelDeferred: true }),
 	});
 }
