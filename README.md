@@ -22,7 +22,7 @@ The upstream project publishes monorepo packages (`@earendil-works/pi-*`). This 
 - **`@kingingwang/pi`** — main package with the `pi` bin wrapper
 - **`@kingingwang/pi-darwin-arm64`** — macOS Apple Silicon binary
 - **`@kingingwang/pi-darwin-x64`** — macOS Intel binary
-- **@kingingwang/pi-linux-x64** — Linux x64 binary
+- **`@kingingwang/pi-linux-x64`** — Linux x64 binary
 - **`@kingingwang/pi-linux-arm64`** — Linux ARM64 binary
 - **`@kingingwang/pi-windows-x64`** — Windows x64 binary
 - **`@kingingwang/pi-windows-arm64`** — Windows ARM64 binary
