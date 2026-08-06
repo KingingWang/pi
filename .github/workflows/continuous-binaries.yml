@@ -156,3 +156,62 @@ jobs:
               --notes-file BUILD_INFO.txt \
               "${release_assets[@]}"
           fi
+
+  publish-npm-dist:
+    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download commit binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pi-binaries-${{ github.sha }}
+          path: .dist-binaries
+
+      - name: Check published version
+        id: version
+        run: |
+          current="$(node -p "require('./packages/coding-agent/package.json').version")"
+          scope="${PI_NPM_SCOPE:-@kingingwang}"
+          published="$(npm view "${scope}/pi" version 2>/dev/null || true)"
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+          echo "published=${published}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${published}" && "${current}" == "${published}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
+
+      - name: Assemble npm distribution packages
+        run: node npm-dist/scripts/assemble.mjs --binaries ".dist-binaries/pi-binaries-${GITHUB_SHA}"
+        env:
+          PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
+          PI_DIST_REPO: ${{ vars.PI_DIST_REPO }}
+
+      - name: Publish npm packages
+        if: ${{ steps.version.outputs.skip != 'true' }}
+        run: node npm-dist/scripts/publish.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
+
+      - name: Skip publish (version already published)
+        if: ${{ steps.version.outputs.skip == 'true' }}
+        run: echo "Version ${{ steps.version.outputs.current }} is already published; skipping npm publish."

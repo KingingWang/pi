@@ -67,11 +67,12 @@ npm update -g @kingingwang/pi
 
 ## CI publishing
 
-The `publish-npm-dist` workflow runs automatically whenever the `Continuous
-Binaries` workflow finishes successfully on `main`. It downloads the binaries
-built by that run and publishes them to npm only when the package version differs
-from the version already published (checked against the main package on the
-registry). It can also be triggered manually with `workflow_dispatch`.
+The Continuous Binaries workflow includes a `publish-npm-dist` job that runs
+after a successful build on `main`. It downloads the binaries built by that same
+run and publishes them to npm, but only when the package version differs from the
+version already published (checked against the main package on the registry). A
+manual `Publish npm dist package` workflow (`workflow_dispatch`) is also available
+for retries or custom runs.
 
 Configure these repository settings first:
 
