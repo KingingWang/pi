@@ -27,7 +27,7 @@ export function openaiProvider(): Provider<"openai-responses"> {
 		// Sign in with ChatGPT tokens only reach the Responses API; the Decisions API rejects them.
 		filterAllModels: (models, credential) =>
 			credential?.type === "oauth" ? models.filter((model) => !isModelType(model, "classifier")) : models,
-		api: openAIResponsesApi(),
+		api: openAIResponsesApi({ fetchDeferred: true, cancelDeferred: true }),
 		classifiers: {
 			"openai-decisions": openAIDecisionsApi(),
 		},
