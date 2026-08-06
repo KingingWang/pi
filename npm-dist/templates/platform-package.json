@@ -1,0 +1,13 @@
+{
+	"name": "__PACKAGE__",
+	"version": "__VERSION__",
+	"description": "Pi standalone binary for __PLATFORM__ (fork distribution)",
+	"license": "MIT",
+	"os": __OS__,
+	"cpu": __CPU__,
+	"files": [
+		"bin"
+	],
+	"homepage": "__HOMEPAGE__",
+	"repository": __REPOSITORY__
+}
