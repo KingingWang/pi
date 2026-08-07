@@ -238,6 +238,12 @@ export const SettingsSchema = Type.Object(
 				{ default: SETTINGS_DEFAULTS.transport },
 			),
 		),
+		nonStreaming: Type.Optional(
+			Type.Boolean({
+				description: "Request non-streaming responses from capable providers.",
+				default: SETTINGS_DEFAULTS.nonStreaming,
+			}),
+		),
 		steeringMode: Type.Optional(
 			Type.Union([Type.Literal("all"), Type.Literal("one-at-a-time")], {
 				default: SETTINGS_DEFAULTS.steeringMode,

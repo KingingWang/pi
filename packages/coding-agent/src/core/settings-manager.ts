@@ -796,6 +796,10 @@ export class SettingsManager {
 		return this.settings.transport ?? SETTINGS_DEFAULTS.transport;
 	}
 
+	getNonStreaming(): boolean {
+		return this.settings.nonStreaming ?? SETTINGS_DEFAULTS.nonStreaming;
+	}
+
 	setTransport(transport: TransportSetting): void {
 		this.globalSettings.transport = transport;
 		this.markModified("transport");

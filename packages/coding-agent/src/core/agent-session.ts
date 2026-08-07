@@ -324,6 +324,8 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe how an accepted prompt was dispatched. Not called if the prompt is rejected. */
 	preflightResult?: (disposition: PromptDisposition) => void;
+	/** Issue non-streaming API requests when supported. */
+	nonStreaming?: boolean;
 }
 
 /** Options for model/thinking mutations. */
@@ -2139,9 +2141,15 @@ export class AgentSession {
 			throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 		}
 
-		await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
-			preflightResult?.("started"),
-		);
+		const previousNonStreaming = this.agent.nonStreaming;
+		this.agent.nonStreaming = options?.nonStreaming ?? previousNonStreaming;
+		try {
+			await this._startRun({ messageType: "user", prompt: expandedText, images: currentImages }, () =>
+				preflightResult?.("started"),
+			);
+		} finally {
+			this.agent.nonStreaming = previousNonStreaming;
+		}
 	}
 
 	/**
