@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added `AgentOptions.nonStreaming` for forwarding non-streaming requests through the agent loop.
+
 ## [0.84.0] - 2026-08-06
 
 ### Breaking Changes

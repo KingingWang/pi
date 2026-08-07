@@ -329,6 +329,13 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--non-streaming flag", () => {
+		test("parses --non-streaming flag", () => {
+			const result = parseArgs(["--non-streaming"]);
+			expect(result.nonStreaming).toBe(true);
+		});
+	});
+
 	describe("--tui-mode flag", () => {
 		test.each(["regular", "fullscreen"] as const)("parses %s mode", (mode) => {
 			const result = parseArgs(["--tui-mode", mode]);

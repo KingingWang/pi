@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added a `nonStreaming` setting, `--non-streaming` CLI flag, SDK session option, prompt option, and RPC prompt field for non-streaming `openai-completions` requests.
+
 ## [0.84.0] - 2026-08-06
 
 ### New Features
