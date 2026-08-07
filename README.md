@@ -45,6 +45,22 @@
 
 `openai-completions` API 支持 `nonStreaming: true`。启用后会发送单次 `stream: false` 请求，并将完整响应中的文本、推理内容、工具调用和用量信息转换为现有事件流格式；默认行为仍为流式请求。
 
+在全局 `~/.pi/agent/settings.json` 或项目 `.pi/settings.json` 中启用后，interactive、print、JSON 和 RPC 模式都会使用该选项：
+
+```json
+{
+  "nonStreaming": true
+}
+```
+
+也可以只对当前 CLI 进程启用：
+
+```bash
+pi --non-streaming
+```
+
+coding-agent SDK 可通过 `createAgentSession({ nonStreaming: true })` 启用，RPC 的 `prompt` 命令可传入 `"nonStreaming": true`。直接使用 agent 或 pi-ai 时，可分别通过 `new Agent({ nonStreaming: true, ... })` 或 `streamSimple(..., { nonStreaming: true })` 启用。
+
 #### OpenAI Responses 后台任务
 
 OpenAI provider 支持 `streamSimple({ deferred: true })`：

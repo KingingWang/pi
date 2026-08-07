@@ -97,6 +97,7 @@ export interface Settings {
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	transport?: TransportSetting; // default: "auto"
+	nonStreaming?: boolean; // default: false - request non-streaming responses from capable providers
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
@@ -816,6 +817,10 @@ export class SettingsManager {
 
 	getTransport(): TransportSetting {
 		return this.settings.transport ?? "auto";
+	}
+
+	getNonStreaming(): boolean {
+		return this.settings.nonStreaming ?? false;
 	}
 
 	setTransport(transport: TransportSetting): void {
