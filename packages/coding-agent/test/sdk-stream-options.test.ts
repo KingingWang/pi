@@ -85,6 +85,11 @@ describe("createAgentSession stream options", () => {
 		requestOptions: SimpleStreamOptions = {},
 		extensionFactory?: ExtensionFactory,
 		providerEvent?: unknown,
+		sessionInvocation?: {
+			sessionNonStreaming?: boolean;
+			promptNonStreaming?: boolean;
+			repeatWithoutPromptOverride?: boolean;
+		},
 	): Promise<SimpleStreamOptions | undefined> {
 		const model = createModel(api);
 		const settingsManager = SettingsManager.inMemory(settings);
@@ -126,11 +131,17 @@ describe("createAgentSession stream options", () => {
 			modelRuntime,
 			settingsManager,
 			sessionManager,
+			nonStreaming: sessionInvocation?.sessionNonStreaming,
 			resourceLoader,
 		});
 
 		try {
-			if (providerEvent === undefined) {
+			if (sessionInvocation) {
+				await session.prompt("capture", { nonStreaming: sessionInvocation.promptNonStreaming });
+				if (sessionInvocation.repeatWithoutPromptOverride) {
+					await session.prompt("capture again");
+				}
+			} else if (providerEvent === undefined) {
 				const stream = await session.agent.streamFunction(
 					model,
 					normalizeContext({ messages: [] }),
@@ -295,6 +306,58 @@ describe("createAgentSession stream options", () => {
 				model: "capture-model",
 			},
 		]);
+	});
+
+	it("forwards nonStreaming from settings", async () => {
+		const options = await captureStreamOptions("openai-completions", { nonStreaming: true });
+
+		expect(options?.nonStreaming).toBe(true);
+	});
+
+	it("defaults nonStreaming to false", async () => {
+		const options = await captureStreamOptions("openai-completions", {});
+
+		expect(options?.nonStreaming).toBe(false);
+	});
+
+	it("lets request nonStreaming override settings", async () => {
+		const options = await captureStreamOptions("openai-completions", { nonStreaming: true }, { nonStreaming: false });
+
+		expect(options?.nonStreaming).toBe(false);
+	});
+
+	it("lets an SDK session option override settings", async () => {
+		const options = await captureStreamOptions(
+			"openai-completions",
+			{ nonStreaming: true },
+			{},
+			undefined,
+			undefined,
+			{
+				sessionNonStreaming: false,
+			},
+		);
+
+		expect(options?.nonStreaming).toBe(false);
+	});
+
+	it("lets a prompt option override the SDK session default", async () => {
+		const options = await captureStreamOptions("openai-completions", {}, {}, undefined, undefined, {
+			sessionNonStreaming: true,
+			promptNonStreaming: false,
+		});
+
+		expect(options?.nonStreaming).toBe(false);
+	});
+
+	it("restores the SDK session default after a prompt override", async () => {
+		const options = await captureStreamOptions("openai-completions", {}, {}, undefined, undefined, {
+			sessionNonStreaming: true,
+			promptNonStreaming: false,
+			repeatWithoutPromptOverride: true,
+		});
+
+		expect(options?.nonStreaming).toBe(true);
 	});
 
 	it("runs before_provider_headers on assembled headers without forwarding the transform", async () => {
