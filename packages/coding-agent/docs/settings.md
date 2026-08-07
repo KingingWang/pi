@@ -120,6 +120,7 @@ See [Themes](themes.md) and [Terminal Setup](terminal-setup.md) for format and p
 | `httpProxy` | string | None | Proxy URL applied as `HTTP_PROXY` and `HTTPS_PROXY` for Pi-managed HTTP clients. **Can only be set in agent-directory settings.** |
 | `httpIdleTimeoutMs` | number | `300000` | HTTP header and body idle timeout in milliseconds. Set to `0` to disable. |
 | `websocketConnectTimeoutMs` | number | `15000` | WebSocket connection timeout in milliseconds. Set to `0` to disable. |
+| `nonStreaming` | boolean | `false` | Request a single non-streaming response from capable providers. Currently supported by `openai-completions` APIs. |
 | `retry.enabled` | boolean | `true` | Enable automatic agent-level retry. |
 | `retry.maxRetries` | number or null | `null` | Maximum agent-level retry attempts; `null` retries without a limit. |
 | `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff. |

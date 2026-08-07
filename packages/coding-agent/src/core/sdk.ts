@@ -87,6 +87,8 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Issue non-streaming API requests when supported (OpenAI Completions). */
+	nonStreaming?: boolean;
 }
 
 /** Result from createAgentSession */
@@ -325,6 +327,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			...options,
 			timeoutMs: options.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs,
 			websocketConnectTimeoutMs: options.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs(),
+			nonStreaming: options.nonStreaming ?? settingsManager.getNonStreaming(),
 			maxRetries: options.maxRetries ?? providerRetrySettings.maxRetries,
 			maxRetryDelayMs: options.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
 			transformHeaders: async (requestHeaders) => {
@@ -385,6 +388,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	};
 
 	const agent = new Agent({
+		nonStreaming: options.nonStreaming,
 		initialState: {
 			systemPrompt: "",
 			model,
