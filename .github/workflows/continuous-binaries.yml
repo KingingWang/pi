@@ -95,7 +95,7 @@ jobs:
           retention-days: 30
 
   publish-continuous-release:
-    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == github.event.repository.default_branch }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -158,7 +158,7 @@ jobs:
           fi
 
   publish-npm-dist:
-    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == github.event.repository.default_branch }}
     needs: build
     runs-on: ubuntu-latest
     concurrency:
