@@ -120,6 +120,8 @@ export interface AgentOptions {
 	transport?: Transport;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	/** Issue a single non-streaming request when the provider supports it (OpenAI Completions). */
+	nonStreaming?: boolean;
 }
 
 class PendingMessageQueue {
@@ -213,6 +215,8 @@ export class Agent {
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
 	public toolExecution: ToolExecutionMode;
 
+	/** Issue non-streaming requests when the provider supports it. */
+	public nonStreaming?: boolean;
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
 		const runtimeOptions: Partial<AgentOptions> = options ?? {};
@@ -233,6 +237,7 @@ export class Agent {
 		this.sessionId = runtimeOptions.sessionId;
 		this.thinkingBudgets = runtimeOptions.thinkingBudgets;
 		this.transport = runtimeOptions.transport ?? "auto";
+		this.nonStreaming = runtimeOptions.nonStreaming;
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
 	}
@@ -454,6 +459,7 @@ export class Agent {
 			transport: this.transport,
 			thinkingBudgets: this.thinkingBudgets,
 			maxRetryDelayMs: this.maxRetryDelayMs,
+			nonStreaming: this.nonStreaming,
 			toolExecution: this.toolExecution,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,

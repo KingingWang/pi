@@ -31,6 +31,12 @@
 - Fixed inherited LaTeX relation, multiplication, and named-operator spacing, and matrix composition with stacked fractions, operator limits, and adjacent matrices.
 - Reduced inherited fullscreen mouse event volume under tmux, Zellij, and GNU Screen by using button-motion tracking instead of all-motion tracking.
 
+## [Unreleased]
+
+### Added
+
+- Added a `nonStreaming` setting, `--non-streaming` CLI flag, SDK session option, prompt option, and RPC prompt field for non-streaming `openai-completions` requests.
+
 ## [0.84.0] - 2026-08-06
 
 ### New Features

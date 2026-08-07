@@ -10,6 +10,12 @@
 
 - Fixed `Agent.reset()` clearing transcript and runtime state during active runs; it now rejects until the agent is idle ([#7717](https://github.com/earendil-works/pi/pull/7717) by [@wesleyzhangwq](https://github.com/wesleyzhangwq)).
 
+## [Unreleased]
+
+### Added
+
+- Added `AgentOptions.nonStreaming` for forwarding non-streaming requests through the agent loop.
+
 ## [0.84.0] - 2026-08-06
 
 ### Breaking Changes
