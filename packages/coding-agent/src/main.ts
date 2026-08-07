@@ -522,6 +522,9 @@ function buildSessionOptions(
 	if (parsed.thinking) {
 		options.thinkingLevel = parsed.thinking;
 	}
+	if (parsed.nonStreaming) {
+		options.nonStreaming = true;
+	}
 
 	// Scoped models for Ctrl+P cycling
 	// Keep thinking level undefined when not explicitly set in the model pattern.
@@ -846,6 +849,7 @@ export async function main(args: string[], options?: MainOptions) {
 			tools: sessionOptions.tools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
+			nonStreaming: sessionOptions.nonStreaming,
 			customTools: sessionOptions.customTools,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
@@ -984,6 +988,7 @@ export async function main(args: string[], options?: MainOptions) {
 	} else {
 		printTimings();
 		const exitCode = await runPrintMode(runtime, {
+			nonStreaming: parsed.nonStreaming,
 			mode: toPrintOutputMode(appMode),
 			messages: parsed.messages,
 			initialMessage,
