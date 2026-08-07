@@ -54,6 +54,24 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PI_NPM_SCOPE: ${{ vars.PI_NPM_SCOPE }}
 
+      - name: Sync npmmirror cache
+        if: ${{ steps.version.outputs.skip != 'true' }}
+        run: |
+          scope="${PI_NPM_SCOPE:-@kingingwang}"
+          packages=(pi pi-darwin-arm64 pi-darwin-x64 pi-linux-x64 pi-linux-arm64 pi-windows-x64 pi-windows-arm64)
+          failed=0
+          for package in "${packages[@]}"; do
+            response="$(curl -sS -X PUT "https://registry.npmmirror.com/-/package/${scope}/${package}/syncs")"
+            echo "${scope}/${package}: ${response}"
+            if ! printf '%s' "$response" | grep -q '"ok":true'; then
+              failed=1
+            fi
+          done
+          if [[ "$failed" -ne 0 ]]; then
+            echo "::error::One or more npmmirror sync requests failed."
+            exit 1
+          fi
+
       - name: Skip publish (version already published)
         if: ${{ steps.version.outputs.skip == 'true' }}
         run: echo "Version ${{ steps.version.outputs.current }} is already published; skipping npm publish."
