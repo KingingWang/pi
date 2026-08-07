@@ -16,6 +16,8 @@ import { toJsonEvent } from "./json-event.ts";
  * Options for print mode.
  */
 export interface PrintModeOptions {
+	/** Issue non-streaming API requests when supported. */
+	nonStreaming?: boolean;
 	/** Output mode: "text" for final response only, "json" for all events */
 	mode: "text" | "json";
 	/** Array of additional prompts to send after initialMessage */
@@ -31,7 +33,7 @@ export interface PrintModeOptions {
  * Sends prompts to the agent and outputs the result.
  */
 export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: PrintModeOptions): Promise<number> {
-	const { mode, messages = [], initialMessage, initialImages } = options;
+	const { mode, messages = [], initialMessage, initialImages, nonStreaming } = options;
 	let exitCode = 0;
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
@@ -129,11 +131,11 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		await rebindSession();
 
 		if (initialMessage) {
-			await session.prompt(initialMessage, { images: initialImages });
+			await session.prompt(initialMessage, { images: initialImages, nonStreaming });
 		}
 
 		for (const message of messages) {
-			await session.prompt(message);
+			await session.prompt(message, { nonStreaming });
 		}
 
 		if (mode === "text") {

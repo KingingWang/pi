@@ -252,6 +252,8 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/** Issue non-streaming API requests when supported. */
+	nonStreaming?: boolean;
 }
 
 /** Options for model/thinking mutations. */
@@ -1322,7 +1324,13 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		await this._runAgentPrompt(messages);
+		const previousNonStreaming = this.agent.nonStreaming;
+		this.agent.nonStreaming = options?.nonStreaming ?? previousNonStreaming;
+		try {
+			await this._runAgentPrompt(messages);
+		} finally {
+			this.agent.nonStreaming = previousNonStreaming;
+		}
 	}
 
 	/**
