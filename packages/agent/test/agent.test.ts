@@ -807,4 +807,23 @@ describe("Agent", () => {
 		await agent.prompt("hello again");
 		expect(receivedSessionId).toBe("session-def");
 	});
+
+	it("forwards nonStreaming to streamFunction options", async () => {
+		let receivedNonStreaming: boolean | undefined;
+		const agent = new Agent({
+			nonStreaming: true,
+			streamFn: (_model, _context, options) => {
+				receivedNonStreaming = options?.nonStreaming;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("ok") });
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("hello");
+
+		expect(receivedNonStreaming).toBe(true);
+	});
 });
