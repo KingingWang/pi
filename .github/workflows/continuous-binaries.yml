@@ -2,8 +2,9 @@ name: Continuous Binaries
 
 on:
   push:
-    branches:
-      - '**'
+    branches-ignore:
+      - 'backup/**'
+      - 'backup-*'
   workflow_dispatch:
 
 permissions: {}
