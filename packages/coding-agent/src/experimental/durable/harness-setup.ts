@@ -37,7 +37,11 @@ export function createHarnessSettings(settingsManager: SettingsManager): Harness
 			return settingsManager.getCompactionSettings();
 		},
 		get retry() {
-			return settingsManager.getRetrySettings();
+			const retry = settingsManager.getRetrySettings();
+			return {
+				...retry,
+				maxRetries: retry.maxRetries === null ? Number.POSITIVE_INFINITY : retry.maxRetries,
+			};
 		},
 		get steeringMode() {
 			return settingsManager.getSteeringMode();
