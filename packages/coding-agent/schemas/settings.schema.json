@@ -50,6 +50,11 @@
       ],
       "default": "auto"
     },
+    "nonStreaming": {
+      "type": "boolean",
+      "description": "Request non-streaming responses from capable providers.",
+      "default": false
+    },
     "steeringMode": {
       "anyOf": [
         {
@@ -144,17 +149,35 @@
           "default": true
         },
         "maxRetries": {
-          "type": "number",
-          "default": 3
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Maximum agent-level retry attempts; null retries without a limit.",
+          "default": null
         },
         "baseDelayMs": {
           "type": "number",
           "description": "Exponential backoff base delay in milliseconds: 2s, 4s, 8s.",
           "default": 2000
         },
+        "maxBackoffMs": {
+          "type": "number",
+          "description": "Maximum agent-level backoff delay in milliseconds (10 minutes default).",
+          "default": 600000
+        },
         "maxAgentDelayMs": {
           "type": "number",
           "default": 60000
+        },
+        "maxUnauthorizedRetries": {
+          "type": "number",
+          "description": "Maximum retry attempts for HTTP 401/authentication failures.",
+          "default": 5
         },
         "provider": {
           "type": "object",
